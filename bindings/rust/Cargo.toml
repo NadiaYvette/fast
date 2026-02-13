@@ -1,0 +1,10 @@
+[package]
+name = "fast-tree"
+version = "0.1.0"
+edition = "2021"
+description = "Rust bindings for the FAST (Fast Architecture Sensitive Tree) library"
+links = "fast"
+
+[lib]
+name = "fast_tree"
+path = "src/lib.rs"
