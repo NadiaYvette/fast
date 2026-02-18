@@ -9,8 +9,6 @@
 //! assert_eq!(tree.search(0), None);
 //! ```
 
-use std::os::raw::c_void;
-
 #[repr(C)]
 struct FastTreeOpaque {
     _private: [u8; 0],
