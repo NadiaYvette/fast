@@ -119,7 +119,7 @@ bench/run_perf.sh build
 
 ## FFI Bindings
 
-Bindings are provided for 15 languages, all wrapping the same C shared
+Bindings are provided for 17 languages, all wrapping the same C shared
 library:
 
 | Language | File | Approach |
@@ -129,6 +129,8 @@ library:
 | Ada | `bindings/ada/fast_binding.ads` | `pragma Import(C)` |
 | Go | `bindings/go/fast.go` | cgo with finalizer |
 | Fortran | `bindings/fortran/fast_binding.f90` | `ISO_C_BINDING` |
+| Java | `bindings/java/` | JNI with `AutoCloseable` |
+| Julia | `bindings/julia/Fast.jl` | `ccall` |
 | Python | `bindings/python/fast.py` | ctypes |
 | Ruby | `bindings/ruby/fast.rb` | FFI gem |
 | R | `bindings/r/fast.R` | `dyn.load` + `.Call` |
