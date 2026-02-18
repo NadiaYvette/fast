@@ -45,6 +45,11 @@ add_executable(fast_bench bench/bench.c)
 target_link_libraries(fast_bench fast_static)
 target_include_directories(fast_bench PRIVATE include)
 
+# Perf comparison benchmark
+add_executable(fast_bench_perf bench/bench_perf.c)
+target_link_libraries(fast_bench_perf fast_static)
+target_include_directories(fast_bench_perf PRIVATE include)
+
 # Install rules
 include(GNUInstallDirs)
 install(TARGETS fast fast_static
