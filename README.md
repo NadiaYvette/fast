@@ -117,6 +117,40 @@ hardware counters:
 bench/run_perf.sh build
 ```
 
+### Cross-Language Benchmark
+
+Compare FAST FFI performance against readily-available tree-based data
+structures across all bound languages:
+
+| Language | Native Comparison | Library Type |
+|----------|------------------|--------------|
+| C | SQLite3 `INTEGER PRIMARY KEY` | B+ tree |
+| C++ | `std::map` | Red-black tree |
+| Rust | `BTreeMap` | B-tree |
+| Java | `TreeMap` | Red-black tree |
+| Haskell | `Data.Map.Strict` | Balanced BST |
+| OCaml | `Map.Make` | AVL tree |
+| Ada | `Ada.Containers.Ordered_Maps` | Red-black tree |
+| Mercury | `tree234` | 2-3-4 tree |
+| Prolog | `library(assoc)` | AVL tree |
+| Python | `bisect` / `SortedList` | Sorted array / B-tree-like |
+| Go | `sort.Search` | Binary search (no stdlib tree) |
+| Julia | `searchsortedfirst` | Binary search (no stdlib tree) |
+
+```bash
+python3 bench/lang_report.py --output fast_lang_report.pdf
+```
+
+This auto-detects available compilers/interpreters, compiles per-language
+benchmarks, and generates a multi-page PDF comparing FAST FFI throughput
+against each language's readily-available ordered containers. Supports
+alternative compilers (gcc vs clang, SBCL vs CLISP). Run with specific
+languages:
+
+```bash
+python3 bench/lang_report.py --languages c cpp rust python java go
+```
+
 ## FFI Bindings
 
 Bindings are provided for 17 languages, all wrapping the same C shared
@@ -174,7 +208,9 @@ bench/bench.c             Throughput benchmark
 bench/bench_perf.c        Perf counter comparison benchmark
 bench/run_perf.sh         Hardware counter sweep script
 bench/report.py           PDF report generator
-bindings/                 FFI bindings for 15 languages
+bench/lang_report.py      Cross-language benchmark orchestrator
+bench/lang/               Per-language benchmark scripts (17 languages)
+bindings/                 FFI bindings for 17 languages
 FUTURE.md                 Future extensions (superpages, AVX, compression)
 ```
 

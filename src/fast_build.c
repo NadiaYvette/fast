@@ -73,6 +73,8 @@ static void build_inorder_map(size_t *bfs_to_sorted, size_t n)
  * Returns the number of nodes written (2^depth - 1).
  */
 static size_t write_bfs_block(const int32_t *bfs_tree, int32_t *out,
+                              int32_t *sorted_rank_out,
+                              const size_t *bfs_to_sorted, size_t n_keys,
                               size_t bfs_root, size_t out_pos,
                               int depth, size_t total_bfs_nodes)
 {
@@ -80,7 +82,6 @@ static size_t write_bfs_block(const int32_t *bfs_tree, int32_t *out,
     size_t block_size = ((size_t)1 << depth) - 1;
 
     /* BFS traversal of the subtree: level by level */
-    /* Queue: we process nodes level by level */
     size_t *queue = (size_t *)malloc(block_size * sizeof(size_t));
     size_t head = 0, tail = 0;
 
@@ -97,6 +98,9 @@ static size_t write_bfs_block(const int32_t *bfs_tree, int32_t *out,
         level_remaining--;
 
         out[out_pos + count] = bfs_tree[node];
+        /* Map layout position to sorted index; sentinel nodes get n_keys */
+        size_t si = bfs_to_sorted[node];
+        sorted_rank_out[out_pos + count] = (si < n_keys) ? (int32_t)si : (int32_t)n_keys;
         count++;
 
         size_t left = 2 * node + 1;
@@ -191,6 +195,8 @@ static size_t collect_children(size_t bfs_root, int depth,
  * `depths`: array [d_K, d_L, d_P]
  */
 static void lay_out_subtree(const int32_t *bfs_tree, int32_t *out,
+                            int32_t *sorted_rank_out,
+                            const size_t *bfs_to_sorted, size_t n_keys,
                             size_t bfs_root, size_t *out_pos,
                             int remaining_depth, int blocking_level,
                             const int *depths, size_t total_bfs_nodes)
@@ -201,55 +207,41 @@ static void lay_out_subtree(const int32_t *bfs_tree, int32_t *out,
     int block_depth = depths[blocking_level];
 
     if (remaining_depth <= block_depth || blocking_level == 0) {
-        /*
-         * Base case: remaining tree fits in one block at this level,
-         * or we're at the SIMD (innermost) level.
-         * Write the subtree in plain BFS order.
-         */
         int actual_depth = remaining_depth < block_depth ? remaining_depth : block_depth;
-        size_t written = write_bfs_block(bfs_tree, out, bfs_root, *out_pos,
+        size_t written = write_bfs_block(bfs_tree, out, sorted_rank_out,
+                                         bfs_to_sorted, n_keys,
+                                         bfs_root, *out_pos,
                                          actual_depth, total_bfs_nodes);
         *out_pos += written;
 
-        /* Now lay out children (subtrees below this block) */
         if (remaining_depth > block_depth) {
-            size_t children[1 << FAST_DK]; /* max children at SIMD level */
+            size_t children[1 << FAST_DK];
             size_t nchildren = collect_children(bfs_root, actual_depth,
                                                 children, total_bfs_nodes);
             for (size_t i = 0; i < nchildren; i++) {
-                lay_out_subtree(bfs_tree, out, children[i], out_pos,
+                lay_out_subtree(bfs_tree, out, sorted_rank_out,
+                                bfs_to_sorted, n_keys,
+                                children[i], out_pos,
                                 remaining_depth - actual_depth, blocking_level,
                                 depths, total_bfs_nodes);
             }
         }
     } else {
-        /*
-         * Recursive case: decompose this block into sub-blocks at the
-         * next finer blocking level.
-         *
-         * Write the top `block_depth` levels of the subtree, but with
-         * the internal structure recursively blocked at the next level down.
-         */
-        /* First, lay out the top portion (block_depth levels) using the
-           next finer blocking level */
-        /* Actually: we write the top block_depth levels as a unit, then
-           recurse into children.  The internal structure of this block
-           is handled by the next-level-down decomposition. */
-
-        /* Lay out the top `block_depth` levels using finer blocking */
-        lay_out_subtree(bfs_tree, out, bfs_root, out_pos,
+        lay_out_subtree(bfs_tree, out, sorted_rank_out,
+                        bfs_to_sorted, n_keys,
+                        bfs_root, out_pos,
                         block_depth, blocking_level - 1,
                         depths, total_bfs_nodes);
 
-        /* Collect children at block_depth levels below bfs_root */
         size_t max_children = (size_t)1 << block_depth;
         size_t *children = (size_t *)malloc(max_children * sizeof(size_t));
         size_t nchildren = collect_children(bfs_root, block_depth,
                                             children, total_bfs_nodes);
 
-        /* Recursively lay out each child subtree at this blocking level */
         for (size_t i = 0; i < nchildren; i++) {
-            lay_out_subtree(bfs_tree, out, children[i], out_pos,
+            lay_out_subtree(bfs_tree, out, sorted_rank_out,
+                            bfs_to_sorted, n_keys,
+                            children[i], out_pos,
                             remaining_depth - block_depth, blocking_level,
                             depths, total_bfs_nodes);
         }
@@ -327,40 +319,61 @@ int fast_build_layout(struct fast_tree *t, const int32_t *sorted_keys, size_t n)
         else
             bfs_tree[i] = FAST_KEY_MAX;
     }
-    free(bfs_to_sorted);
-
     /* Allocate output layout array (aligned to page boundary for TLB perf) */
     size_t layout_bytes = tree_nodes * sizeof(int32_t);
     /* Round up to multiple of 64 (cache line) and add padding for SSE loads */
     layout_bytes = ((layout_bytes + 63) / 64) * 64 + 16;
+    size_t layout_elems = layout_bytes / sizeof(int32_t);
 
     t->layout = NULL;
     if (posix_memalign((void **)&t->layout, t->page_size > 64 ? 4096 : 64,
                        layout_bytes) != 0) {
+        free(bfs_to_sorted);
         free(bfs_tree);
         free(t->keys);
         t->keys = NULL;
         return -1;
     }
 
-    /* Fill layout with sentinel */
-    for (size_t i = 0; i < layout_bytes / sizeof(int32_t); i++)
-        t->layout[i] = FAST_KEY_MAX;
+    /* Allocate sorted_rank array (same size as layout) */
+    t->sorted_rank = (int32_t *)malloc(layout_bytes);
+    if (!t->sorted_rank) {
+        free(t->layout);
+        t->layout = NULL;
+        free(bfs_to_sorted);
+        free(bfs_tree);
+        free(t->keys);
+        t->keys = NULL;
+        return -1;
+    }
+    t->layout_size = layout_elems;
 
-    /* Perform hierarchical blocked layout */
+    /* Fill layout with sentinel, sorted_rank with n (invalid) */
+    for (size_t i = 0; i < layout_elems; i++) {
+        t->layout[i] = FAST_KEY_MAX;
+        t->sorted_rank[i] = (int32_t)n;
+    }
+
+    /* Perform SIMD-blocked layout.
+     *
+     * We use blocking_level=0 (SIMD only) which writes 3-node BFS blocks
+     * with their 4 child subtrees contiguous.  This matches the search
+     * traversal's offset computation: after each 3-key SIMD block,
+     * child i's subtree is at offset + 3 + i * child_subtree_size.
+     *
+     * Cache-line and page blocking (levels 1, 2) would require a search
+     * that tracks nested block offsets; for now SIMD blocking provides
+     * correctness and the main performance benefit (SSE comparisons).
+     */
     int depths[3] = { FAST_DK, FAST_DL, t->d_p };
-    int blocking_level;
-    if (d_n <= FAST_DK)
-        blocking_level = 0;
-    else if (d_n <= FAST_DL)
-        blocking_level = 1;
-    else
-        blocking_level = 2;
 
     size_t out_pos = 0;
-    lay_out_subtree(bfs_tree, t->layout, 0, &out_pos, d_n, blocking_level,
+    lay_out_subtree(bfs_tree, t->layout, t->sorted_rank,
+                    bfs_to_sorted, n,
+                    0, &out_pos, d_n, 0,
                     depths, tree_nodes);
 
+    free(bfs_to_sorted);
     free(bfs_tree);
     return 0;
 }

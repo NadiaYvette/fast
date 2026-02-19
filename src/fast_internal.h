@@ -70,12 +70,23 @@
  *   - mask=0b111 (7): query > all three             → child 3 (right subtree of right child)
  *
  * But _mm_movemask_ps extracts the sign bits of 32-bit floats, giving
- * bits in order [b3,b2,b1,b0] from the 4 lanes.  With our layout the
- * valid mask values and their child indices are:
+ * bits in order [b3,b2,b1,b0] from the 4 lanes.  With our BFS layout
+ * [root, left_child, right_child] where left_child < root < right_child:
+ *
+ *   bit 0 = (key > root), bit 1 = (key > left_child), bit 2 = (key > right_child)
+ *
+ *   - mask=0b000 (0): key <= left_child (and thus <= root) → child 0
+ *   - mask=0b001 (1): key > root but key <= left_child    → impossible (left < root)
+ *   - mask=0b010 (2): key > left_child, key <= root       → child 1
+ *   - mask=0b011 (3): key > root and left_child, <= right  → child 2
+ *   - mask=0b100 (4): key > right_child but <= others      → impossible
+ *   - mask=0b101 (5): impossible
+ *   - mask=0b110 (6): impossible
+ *   - mask=0b111 (7): key > all three                      → child 3
  */
 static const int FAST_LOOKUP[16] = {
-    0, 1, -1, 2, -1, -1, -1, 3,   /* indices 0-7 */
-    0, 1, -1, 2, -1, -1, -1, 3    /* indices 8-15 (bit 3 = don't care) */
+    0, -1, 1, 2, -1, -1, -1, 3,   /* indices 0-7 */
+    0, -1, 1, 2, -1, -1, -1, 3    /* indices 8-15 (bit 3 = don't care) */
 };
 
 /*
@@ -83,8 +94,10 @@ static const int FAST_LOOKUP[16] = {
  */
 struct fast_tree {
     int32_t *layout;       /* Hierarchically blocked tree array (aligned) */
+    int32_t *sorted_rank;  /* sorted_rank[i] = index in original sorted array for layout[i] */
     int32_t *keys;         /* Copy of original sorted keys */
     size_t   n;            /* Number of actual keys */
+    size_t   layout_size;  /* Number of entries allocated in layout/sorted_rank */
     size_t   tree_nodes;   /* Total nodes in padded complete binary tree (2^d_N - 1) */
     int      d_n;          /* Depth of tree (number of levels) */
     int      d_p;          /* Page blocking depth (depends on system page size) */

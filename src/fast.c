@@ -23,6 +23,7 @@ void fast_destroy(fast_tree_t *tree)
         return;
 
     free(tree->layout);
+    free(tree->sorted_rank);
     free(tree->keys);
     free(tree);
 }
