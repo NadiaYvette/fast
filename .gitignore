@@ -3,4 +3,3 @@ __pycache__/
 *.o
 *.pyc
 .claude/
-fast_report.pdf
